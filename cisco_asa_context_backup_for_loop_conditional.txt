@@ -1,0 +1,72 @@
+---
+################################################################################
+# This Playbook checks if the firewall is multicontext, extracts the context names
+# then it backs up each context
+#
+# Hosts file should look like this:
+#
+#[fw:vars]
+#ansible_network_os=asa
+#ansible_python_interpreter=auto_silent
+# 
+#[fw]
+#asa001 ansible_host=192.168.252.1
+#asa002 ansible_host=192.168.252.2
+################################################################################
+
+#########################################################
+# How to back up a multicontext firewall using Ansible
+#########################################################
+
+- name: ASA context backup
+  hosts:
+    all
+  connection: network_cli
+  gather_facts: no
+  strategy: linear
+ 
+  tasks:
+    - name: ASA block
+      block:
+        - name: Contexts
+          block: 
+            - name: Get context
+              asa_command:
+                commands:
+                  - show run | inc context
+              register: var_context
+ 
+            - set_fact:
+                asa_multi_context: no
+            - set_fact:
+                asa_multi_context: yes
+              when: var_context.stdout[0] != ""
+ 
+        - name: Contexts present   
+          block:
+            - name: Discover contexts
+              asa_command:
+                commands:
+                  - changeto system
+                  - show run context | inc context
+              register: var_contexts_names
+ 
+            - name: Take backup
+              asa_config:
+                context: "{{ item.split(' ')[1] }}"
+                backup: yes
+                backup_options:
+                  dir_path: "~./output/"
+                  filename: "{{ inventory_hostname }}-{{ item.split(' ')[1] }}.cfg"
+              loop:
+                "{{ var_contexts_names.stdout_lines[1] }}"
+          when: asa_multi_context == true
+   
+        - name: No contexts present
+          asa_config:
+            backup: yes
+            backup_options:
+              dir_path: "~./output/"
+              filename: "{{ inventory_hostname }}.cfg"
+          when: asa_multi_context == false
+      when: ansible_network_os == 'asa'
